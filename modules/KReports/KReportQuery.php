@@ -976,6 +976,11 @@ class KReportQuery {
                      //2011-12-29 check if we have a jointpye
                     $obj = $this->joinSegments[$leftPath]['object'];
                     $right=$rightArray[2];
+                    // ###EPS###
+                     // load the module on the right hand side
+                     require_once($beanFiles[$beanList[$obj->$right->getRelatedModuleName()]]);
+                     $this->joinSegments[$thisPath]['object'] = new $beanList[$obj->$right->getRelatedModuleName()]();
+                     // ###EPS### END
                      if ($thisPathDetails['jointype'] != '') {
                         //2011-12-29 see if the relationship vuilds on a custom field
                         if (isset($obj->field_name_map[$obj->$right->_relationship->rhs_key]['source']) && ($obj->field_name_map[$obj->$right->_relationship->rhs_key]['source'] == 'custom_fields' || $obj->field_name_map[$obj->$right->_relationship->lhs_key]['source'] == 'custom_fields')) {
@@ -1000,13 +1005,44 @@ class KReportQuery {
                         if (isset($obj->field_defs[$right]['side']) && $obj->field_defs[$right]['side'] == 'left' && !$obj->$right->_swap_sides)
                            $obj->$right->_swap_sides = true;
 
-                        $linkJoin = $obj->$right->getJoin($join_params);
-
-                        $this->fromString .= ' ' . $linkJoin;
+                        // ###EPS###
+                        // $linkJoin = $obj->$right->getJoin($join_params);
+                        // $this->fromString .= ' ' . $linkJoin;
+                        if ($this->joinSegments[$thisPath]['object']->bean_implements('ACL') && ACLController::requireSecurityGroup($this->joinSegments[$thisPath]['object']->module_dir, $access_check)) {
+                           $linkJoinArray = $obj->$right->getJoin($join_params, true);
+                           $linkJoin = $linkJoinArray['join'];
+   
+                           $linkIsLHS = $obj->$right->getSide() == REL_LHS;
+                           $mainTableName = $linkIsLHS ? $obj->$right->relationship->def['rhs_table'] : $obj->$right->def['lhs_table'];
+                           $mainTableAlias = $linkJoinArray['join_tables'][1];
+   
+                           $replacement = 
+                           "(select distinct {$mainTableAlias}main.* FROM {$mainTableName} {$mainTableAlias}main 
+                              left join securitygroups_records {$mainTableAlias}sr on {$mainTableAlias}sr.record_id = {$mainTableAlias}main.id and {$mainTableAlias}sr.deleted = 0 
+                              join 
+                                 (
+                                    select '{$current_user->id}' as user, 1 as fromsg, {$mainTableAlias}su.securitygroup_id as sg
+                                    from securitygroups_users {$mainTableAlias}su 
+                                    where {$mainTableAlias}su.user_id = '{$current_user->id}'
+                                    and {$mainTableAlias}su.deleted = 0
+                                    union 
+                                    select '{$current_user->id}' as user, 0 as fromsg, '' as sg
+                                 ) {$mainTableAlias}XX on ({$mainTableAlias}XX.user <> {$mainTableAlias}main.assigned_user_id and {$mainTableAlias}XX.sg = {$mainTableAlias}sr.securitygroup_id)
+                                       OR ({$mainTableAlias}XX.user = {$mainTableAlias}main.assigned_user_id AND 0 = fromsg)
+                           )";
+                           $linkJoin2 = str_replace(' ' . $mainTableName . ' ', $replacement, $linkJoin);
+   
+                           $this->fromString .= ' ' . $linkJoin2;
+                        }
+                        else {
+                           $linkJoin = $obj->$right->getJoin($join_params);
+                           $this->fromString .= ' ' . $linkJoin;
+                        }
                      }
                      // load the module on the right hand side
-                     require_once($beanFiles[$beanList[$obj->$right->getRelatedModuleName()]]);
-                     $this->joinSegments[$thisPath]['object'] = new $beanList[$obj->$right->getRelatedModuleName()]();
+                     // require_once($beanFiles[$beanList[$obj->$right->getRelatedModuleName()]]);
+                     // $this->joinSegments[$thisPath]['object'] = new $beanList[$obj->$right->getRelatedModuleName()]();
+                     // ###EPS### END
 
                      //bugfix 2010-08-19, respect ACL role access for owner reuqired in select
                      // NS-Team if ($this->joinSegments[$leftPath]['object']->bean_implements('ACL') && ACLController::requireOwner($this->joinSegments[$leftPath]['object']->module_dir, 'list')) {
@@ -1050,21 +1086,23 @@ class KReportQuery {
                            //2013-03-26 Bug#460 Typo changed
                            case 'SecurityGroups':
                               // NS-Team if ($this->joinSegments[$thisPath]['object']->bean_implements('ACL') && ACLController::requireSecurityGroup($this->joinSegments[$thisPath]['object']->module_dir, 'list')) {
-                              if ($this->joinSegments[$thisPath]['object']->bean_implements('ACL') && ACLController::requireSecurityGroup($this->joinSegments[$thisPath]['object']->module_dir, $access_check)) {
-                                 require_once('modules/SecurityGroups/SecurityGroup.php');
-                                 global $current_user;
-                                 $owner_where = str_replace($this->joinSegments[$thisPath]['object']->table_name, $this->joinSegments[$thisPath]['alias'], $this->joinSegments[$thisPath]['object']->getOwnerWhere($current_user->id));
-                                 $group_where = SecurityGroup::getGroupWhere($this->joinSegments[$thisPath]['alias'], $this->joinSegments[$thisPath]['object']->module_dir, $current_user->id);
-                                 if (!empty($owner_where)) {
-                                    if (empty($this->whereString)) {
-                                       $this->whereString = " (" . $owner_where . " or " . $group_where . ") ";
-                                    } else {
-                                       $this->whereString .= " AND (" . $owner_where . " or " . $group_where . ") ";
-                                    }
-                                 } else {
-                                    $this->whereString .= ' AND ' . $group_where;
-                                 }
-                              }
+                              // ###EPS###
+                              // if ($this->joinSegments[$thisPath]['object']->bean_implements('ACL') && ACLController::requireSecurityGroup($this->joinSegments[$thisPath]['object']->module_dir, $access_check)) {
+                              //    require_once('modules/SecurityGroups/SecurityGroup.php');
+                              //    global $current_user;
+                              //    $owner_where = str_replace($this->joinSegments[$thisPath]['object']->table_name, $this->joinSegments[$thisPath]['alias'], $this->joinSegments[$thisPath]['object']->getOwnerWhere($current_user->id));
+                              //    $group_where = SecurityGroup::getGroupWhere($this->joinSegments[$thisPath]['alias'], $this->joinSegments[$thisPath]['object']->module_dir, $current_user->id);
+                              //    if (!empty($owner_where)) {
+                              //       if (empty($this->whereString)) {
+                              //          $this->whereString = " (" . $owner_where . " or " . $group_where . ") ";
+                              //       } else {
+                              //          $this->whereString .= " AND (" . $owner_where . " or " . $group_where . ") ";
+                              //       }
+                              //    } else {
+                              //       $this->whereString .= ' AND ' . $group_where;
+                              //    }
+                              // }
+                              // ###EPS###
                               break;
                         }
                      }
